@@ -17,7 +17,7 @@ var (
 	clients    = make(map[net.Conn]Client)
 	messages   = make(chan string)
 	join       = make(chan Client)
-	disconnect = make(chan net.Conn)
+	disconnect = make(chan Client)
 )
 
 func main() {
@@ -30,27 +30,7 @@ func main() {
 	defer listener.Close()
 
 	// start dispatcher goroutine
-	go func() {
-		for {
-			select {
-			case msg := <-messages:
-				// listen on messages channel and send incoming message to all clients
-				for _, client := range clients {
-					_, err := client.conn.Write([]byte(msg))
-					if err != nil {
-						log.Println("Failed to send message to client:", err)
-						continue
-					}
-				}
-			case newClient := <-join:
-				// listen on join channel and add new client to clients map
-				clients[newClient.conn] = newClient
-			case conn := <-disconnect:
-				// listen on disconnect channel and remove client from clients map
-				delete(clients, conn)
-			}
-		}
-	}()
+	go startDispatcher()
 
 	for {
 		conn, err := listener.Accept()
@@ -61,6 +41,40 @@ func main() {
 
 		// handle new connection in a separate goroutine
 		go handleConnection(conn)
+	}
+}
+
+func startDispatcher() {
+	for {
+		select {
+		case msg := <-messages:
+			// listen on messages channel and send incoming message to all clients
+			for _, client := range clients {
+				_, err := client.conn.Write([]byte(msg))
+				if err != nil {
+					log.Println("Failed to send message to client:", err)
+					continue
+				}
+			}
+		case newClient := <-join:
+			// listen on join channel and add new client to clients map
+			clients[newClient.conn] = newClient
+			for _, client := range clients {
+				_, err := client.conn.Write([]byte(newClient.name + " joined the server!\n"))
+				if err != nil {
+					log.Println("Failed to send message to client:", err)
+				}
+			}
+		case clientLeft := <-disconnect:
+			// listen on disconnect channel and remove client from clients map
+			delete(clients, clientLeft.conn)
+			for _, client := range clients {
+				_, err := client.conn.Write([]byte(clientLeft.name + " left the server!\n"))
+				if err != nil {
+					log.Println("Failed to send message to client:", err)
+				}
+			}
+		}
 	}
 }
 
@@ -103,7 +117,7 @@ func handleConnection(conn net.Conn) {
 	for {
 		msg, err := reader.ReadString('\n') // blocks until new message is read
 		if err != nil {
-			disconnect <- conn
+			disconnect <- client
 			return
 		}
 		messages <- fmt.Sprintf("[%s] %s", client.name, msg) // send message to message channel
