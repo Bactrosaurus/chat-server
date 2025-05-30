@@ -27,7 +27,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer listener.Close()
+
+	defer func(listener net.Listener) {
+		err := listener.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}(listener)
 
 	// start dispatcher goroutine
 	go startDispatcher()
@@ -79,7 +85,13 @@ func startDispatcher() {
 }
 
 func handleConnection(conn net.Conn) {
-	defer conn.Close()
+	defer func(conn net.Conn) {
+		err := conn.Close()
+		if err != nil {
+			log.Println("Failed to close connection:", err)
+		}
+	}(conn)
+
 	reader := bufio.NewReader(conn)
 
 	// username entry logic
